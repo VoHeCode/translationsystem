@@ -322,13 +322,26 @@ class TranslationSystem:
 
     def run_tr_extractor_ui(self) -> None:
         """
-        Launch the Flet-based translation editor UI.
+        Launch the translation editor GUI.
 
-        Provides:
-        - Extract tr() and _() calls from Python files
-        - Edit translations with placeholder validation
+        Opens a Flet-based graphical interface for:
+        - Extracting tr() and _() calls from Python source files
+        - Editing translations with side-by-side comparison
+        - Validating placeholders (e.g., {name}, {count})
+        - Search, filter, and sort functionality
         - Undo/Redo support
-        - Search and sort functionality
+        - Auto-save to JSON locale files
+
+        The editor automatically creates/updates JSON files in:
+        assets/locales/{scriptname}_{locale}.json
+
+        Usage:
+            ts = TranslationSystem()
+            ts.run_tr_extractor_ui()
+
+        Note:
+            This method blocks until the UI is closed (runs ft.app()).
+            Cannot be called from within another Flet application.
         """
         import flet as ft
         import locale
