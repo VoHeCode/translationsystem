@@ -155,6 +155,9 @@ class TranslationSystem:
 
         scale = target_width / w_ref
         new_size = int(ref_size * scale)
+        # don't go bigger my that's a feature for later
+        if new_size>ref_size:
+            new_size=ref_size
         self._last_newsize = new_size
         return new_size
 

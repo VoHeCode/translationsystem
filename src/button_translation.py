@@ -6,8 +6,8 @@ from translator import TranslationSystem
 
 ts = TranslationSystem("de_DE")
 _ = ts.tr
-# ts.run_tr_extractor_ui()# comment this after each settig
-# exit() # comment this after each settig
+#ts.run_tr_extractor_ui()# comment this after each settig
+#exit() # comment this after each settig
 
 def main(page: ft.Page):
     # Exit button handler
