@@ -89,10 +89,16 @@ class TranslationSystem:
         if size in self._font_cache:
             return self._font_cache[size]
 
+        if not PIL_AVAILABLE:
+            raise RuntimeError(
+                "PIL/Pillow is required for text measurement. "
+                "Install with: pip install Pillow"
+            )
+
         base = os.path.dirname(__file__)
         font_path = os.path.join(base, "assets", "fonts", "Roboto-Regular.ttf")
 
-        if PIL_AVAILABLE and os.path.exists(font_path):
+        if os.path.exists(font_path):
             font = ImageFont.truetype(font_path, size)
         else:
             font = ImageFont.load_default()
@@ -155,9 +161,10 @@ class TranslationSystem:
 
         scale = target_width / w_ref
         new_size = int(ref_size * scale)
-        # don't go bigger my that's a feature for later
-        if new_size>ref_size:
-            new_size=ref_size
+
+        # Don't scale up beyond reference size (only scale down to fit)
+        if new_size > ref_size:
+            new_size = ref_size
         self._last_newsize = new_size
         return new_size
 
@@ -192,7 +199,13 @@ class TranslationSystem:
         Returns:
             Sorted list of locale codes (e.g., ["de_DE", "en_US"])
         """
-        app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        # Get directory - prefer __file__ over sys.argv[0] for reliability
+        if '__file__' in globals():
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+        else:
+            app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+
+        # Get app name from calling script
         app_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 
         locales_dir = os.path.join(app_dir, "assets", "locales")
@@ -231,7 +244,13 @@ class TranslationSystem:
             self._translation_cache = {}
             return
 
-        app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        # Get directory - prefer __file__ over sys.argv[0] for reliability
+        if '__file__' in globals():
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+        else:
+            app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+
+        # Get app name from calling script
         app_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 
         json_path = os.path.join(
@@ -279,11 +298,8 @@ class TranslationSystem:
         self.store_text_metrics(text, fontsize)
         self.resize_text(translated, self.get_width(), fontsize)
 
-        # Try to format, return raw if fails
-        try:
-            return translated.format()
-        except (KeyError, ValueError):
-            return translated
+        # Return translated string (user will call .format() themselves if needed)
+        return translated
 
     # Alias for gettext compatibility
     def _(self, text: str, fontsize: int = 20) -> str:

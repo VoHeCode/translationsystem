@@ -29,7 +29,7 @@ from translator import TranslationSystem
 # and add this line
 ts = TranslationSystem()
 # then init it with the right locale_countrycode  de_DE en_US fr_FR etc.
-ts.tr_init("de_DE")
+ts.set_locale("de_DE")
 # then only, when you have translateable stings in your file or any time after
 # that you want to setup the strings to translate uncommend and run the following 2 lines
 #ts.run_tr_extractor_ui()
