@@ -134,6 +134,21 @@ translated = ts._("Hello World")  # Same as tr()
 
 **Returns:** Translated string with placeholders intact
 
+#### Scaling Methods
+
+##### `tr_size()`
+
+Returns the font size so that the translated word has the same width as the original word.
+
+```python
+translated = ts.tr("Hello World",20)
+newsize = ts.tr_size() 
+```
+
+**Parameters:**
+
+**Returns:** fontsize as int
+
 ##### `set_locale(locale_code, fallback=None)`
 
 Set the current locale and load translations.
@@ -352,6 +367,40 @@ button_width = 150
 new_size = ts.resize_text(label, button_width, ref_size=16)
 
 print(f"Use font size {new_size}pt to fit {button_width}px width")
+
+# or use it this way (recommended) flet sample code:
+
+# default fontsize of the UI you create
+FONTSIZE = 20
+# Translate text at 20pt, then use calculated size for button
+page.theme = ft.Theme(
+    font_family="Roboto",
+    text_theme=ft.TextTheme(
+        body_medium=ft.TextStyle(size=FONTSIZE)
+    )
+)
+
+# Translate the string "Settings" the actual Fontsize ist given
+text = ts.tr("Settings", FONTSIZE)
+# asize gets back a new fontsize for the translated string
+asize = ts.tr_size()
+# that mean a Word "Settings" 8 Letter long in 20px fontsize
+# translated to "Setze Einstellung" 17 Letter long 
+# give us a ts.tr_size() of 9px for the new fontsize 
+# so it fit's in the same place! (A Button will not grow )
+#
+
+
+page.add(
+  ft.ElevatedButton(text, 
+                    style=ft.ButtonStyle(text_style=ft.TextStyle(size=ts.tr_size()))
+                    ),
+  ft.ElevatedButton(_("Exit",FONTSIZE),
+                    on_click=exit_app,
+                    style=ft.ButtonStyle(text_style=ft.TextStyle(size=ts.tr_size()))
+                    )
+)
+
 ```
 
 ## 📋 GUI Editor Workflow
