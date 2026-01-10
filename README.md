@@ -2,6 +2,7 @@
 
 Complete translation system for Python applications with integrated GUI editor for managing multilingual content.
 
+Due to changes from flet 0.2x.x to flet >0.79.0, I had to adjust this as well. Therefore, it is currently not (or no longer) backwards compatible.
 ## ✨ Features
 
 ### Core Translation

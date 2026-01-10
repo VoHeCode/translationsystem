@@ -33,6 +33,9 @@ import re
 import warnings
 from typing import Dict, List, Tuple, Optional
 
+import flet as ft
+import locale
+
 # Pillow optional for text measurement
 try:
     from PIL import ImageFont
@@ -239,7 +242,7 @@ class TranslationSystem:
         return self._current_locale
 
     def _load_locale_for_session(self) -> None:
-        """Load translation data for current locale."""
+        """Load translation data for current locale from ALL matching JSON files."""
         if not self._current_locale:
             self._translation_cache = {}
             return
@@ -250,22 +253,37 @@ class TranslationSystem:
         else:
             app_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
 
-        # Get app name from calling script
-        app_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
+        locales_dir = os.path.join(app_dir, "assets", "locales")
 
-        json_path = os.path.join(
-            app_dir, "assets", "locales", f"{app_name}_{self._current_locale}.json"
-        )
-
-        if not os.path.exists(json_path):
+        if not os.path.isdir(locales_dir):
             self._translation_cache = {}
             return
 
+        # Find ALL *_{locale_code}.json files
+        pattern = f"*_{self._current_locale}.json"
+        self._translation_cache = {}
+
         try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                self._translation_cache = json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            warnings.warn(f"Failed to load locale {self._current_locale}: {e}")
+            for filename in os.listdir(locales_dir):
+                if filename.endswith(f"_{self._current_locale}.json"):
+                    json_path = os.path.join(locales_dir, filename)
+
+                    try:
+                        with open(json_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+
+                            # Merge into cache (later files overwrite earlier)
+                            if isinstance(data, dict):
+                                self._translation_cache.update(data)
+                            # Empty dict {} is OK, just skip
+
+                    except (json.JSONDecodeError, IOError) as e:
+                        # Log warning but continue with other files
+                        warnings.warn(f"Failed to load {filename}: {e}")
+                        continue
+
+        except OSError as e:
+            warnings.warn(f"Failed to read locales directory: {e}")
             self._translation_cache = {}
 
     def tr(self, text: str, fontsize: int = 20) -> str:
@@ -340,56 +358,17 @@ class TranslationSystem:
     # =========================================================
 
     def run_tr_extractor_ui(self) -> None:
-        """
-        Launch the translation editor GUI.
-
-        Opens a Flet-based graphical interface for:
-        - Extracting tr() and _() calls from Python source files
-        - Editing translations with side-by-side comparison
-        - Validating placeholders (e.g., {name}, {count})
-        - Search, filter, and sort functionality
-        - Undo/Redo support
-        - Auto-save to JSON locale files
-
-        The editor automatically creates/updates JSON files in:
-        assets/locales/{scriptname}_{locale}.json
-
-        Usage:
-            ts = TranslationSystem()
-            ts.run_tr_extractor_ui()
-
-        Note:
-            This method blocks until the UI is closed (runs ft.app()).
-            Cannot be called from within another Flet application.
-        """
-        import flet as ft
-        import locale
 
         def get_system_locale() -> str:
-            """Get system locale or default to en_US."""
             lang, enc = locale.getlocale()
-            if not lang:
-                return "en_US"
-            return lang
+            return lang or "en_US"
 
         placeholder_pattern = re.compile(r"\{[^{}]*\}")
 
-        def ui_extract_placeholders(text: str) -> List[str]:
-            """Extract placeholders from text."""
+        def ui_extract_placeholders(text: str):
             return placeholder_pattern.findall(text or "")
 
-        def extract_tr_strings(pyfile: str, locale_code: str) -> Tuple[str, int, int, Dict[str, str]]:
-            """
-            Extract tr() and _() calls from Python file.
-
-            Args:
-                pyfile: Path to Python source file
-                locale_code: Target locale code
-
-            Returns:
-                Tuple of (json_file_path, added_count, total_count, translation_dict)
-            """
-            # Match both tr() and _() calls
+        def extract_tr_strings(pyfile: str, locale_code: str):
             pattern = re.compile(r'(?:tr|_)\(\s*[\'"](.+?)[\'"]\s*(?:,.*?)?\)')
             base = os.path.basename(pyfile)
             name_no_ext = os.path.splitext(base)[0]
@@ -405,28 +384,24 @@ class TranslationSystem:
 
             found = set(pattern.findall(content))
 
-            # Load existing translations
             if os.path.exists(json_file):
                 with open(json_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
             else:
                 data = {}
 
-            # Add new strings
             added = 0
             for s in found:
                 if s not in data:
                     data[s] = s
                     added += 1
 
-            # Save updated file
             with open(json_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
             return json_file, added, len(found), data
 
-        def ui(page: ft.Page) -> None:
-            """Main UI function for Flet."""
+        def ui(page: ft.Page):
             page.title = "tr() / _() Extractor & Editor"
             page.window.width = 1200
             page.window.height = 800
@@ -438,7 +413,6 @@ class TranslationSystem:
             undo_stack = []
             redo_stack = []
 
-            # UI Components
             warning_text = ft.Text("", color=ft.Colors.ORANGE, size=14, weight=ft.FontWeight.BOLD)
 
             search_field = ft.TextField(
@@ -455,8 +429,8 @@ class TranslationSystem:
                     ft.dropdown.Option("alphabetisch"),
                 ],
                 width=200,
-                on_change=lambda e: rebuild_editor()
             )
+            sort_dropdown.on_change = lambda e: rebuild_editor()
 
             locale_dropdown = ft.Dropdown(
                 label="Locale",
@@ -475,49 +449,51 @@ class TranslationSystem:
             )
 
             result_text = ft.Text("", selectable=True)
-            save_status = ft.Text("")
             stats_text = ft.Text("", size=12, color=ft.Colors.BLUE_GREY)
 
-            editor_rows = ft.Column(scroll="auto", expand=True)
+            editor_rows = ft.ListView(spacing=12,scroll=ft.ScrollMode.ALWAYS) #height=int(page.height * 0.6), width=page.width - 40,
 
-            def get_current_data() -> Dict[str, str]:
-                """Extract current data from editor."""
+            def get_current_data():
                 parsed = {}
-                for row in editor_rows.controls:
-                    key = row.controls[0].value
-                    tf = row.controls[1]
-                    parsed[key] = tf.value
+                for control in editor_rows.controls:
+                    # Unterscheide: TextField direkt vs Column
+                    if isinstance(control, ft.TextField):
+                        # Kurze Labels: key ist im label
+                        key = control.label
+                        value = control.value
+                    elif isinstance(control, ft.Column):
+                        # Lange Labels: key ist im Text, value im TextField
+                        key = control.controls[0].value
+                        value = control.controls[1].value
+                    else:
+                        continue
+                    parsed[key] = value
                 return parsed
 
-            def load_data_into_editor(data: Dict[str, str]) -> None:
-                """Load translation data into editor."""
+            def load_data_into_editor(data):
                 nonlocal original_data
                 original_data = dict(data)
                 rebuild_editor()
 
-            def push_undo() -> None:
-                """Save current state to undo stack."""
+            def push_undo():
                 undo_stack.append(get_current_data())
                 redo_stack.clear()
 
-            def undo(e) -> None:
-                """Undo last change."""
+            def undo(e):
                 if not undo_stack:
                     return
                 redo_stack.append(get_current_data())
                 data = undo_stack.pop()
                 load_data_into_editor(data)
 
-            def redo(e) -> None:
-                """Redo last undone change."""
+            def redo(e):
                 if not redo_stack:
                     return
                 undo_stack.append(get_current_data())
                 data = redo_stack.pop()
                 load_data_into_editor(data)
 
-            def update_stats() -> None:
-                """Update translation statistics."""
+            def update_stats():
                 if not original_data:
                     stats_text.value = ""
                     return
@@ -529,13 +505,20 @@ class TranslationSystem:
                 stats_text.value = f"📊 {translated}/{total} translated ({percent:.1f}%)"
                 page.update()
 
-            def update_warning_banner() -> None:
-                """Check for missing placeholders and update warning."""
+            def update_warning_banner():
                 errors = 0
-                for row in editor_rows.controls:
-                    key = row.controls[0].value
-                    tf = row.controls[1]
-                    value = tf.value
+                for control in editor_rows.controls:
+                    # Unterscheide: TextField direkt vs Column
+                    if isinstance(control, ft.TextField):
+                        # Kurze Labels: key ist im label
+                        key = control.label
+                        value = control.value
+                    elif isinstance(control, ft.Column):
+                        # Lange Labels: key ist im Text, value im TextField
+                        key = control.controls[0].value
+                        value = control.controls[1].value
+                    else:
+                        continue
 
                     expected = ui_extract_placeholders(key)
                     current = ui_extract_placeholders(value)
@@ -551,8 +534,7 @@ class TranslationSystem:
                 )
                 page.update()
 
-            def on_value_change(e, k: str, textfield: ft.TextField) -> None:
-                """Handle text field changes."""
+            def on_value_change(e, k, textfield):
                 push_undo()
                 expected_inner = ui_extract_placeholders(k)
                 current_inner = ui_extract_placeholders(textfield.value)
@@ -561,8 +543,7 @@ class TranslationSystem:
                 update_warning_banner()
                 update_stats()
 
-            def rebuild_editor() -> None:
-                """Rebuild editor with current filter/sort settings."""
+            def rebuild_editor():
                 if not original_data:
                     editor_rows.controls.clear()
                     page.update()
@@ -577,60 +558,77 @@ class TranslationSystem:
                     items.sort(key=lambda x: x[0].lower())
 
                 for key, value in items:
-                    # Filter by search query
                     if query and query not in key.lower() and query not in (value or "").lower():
                         continue
 
-                    # Check for missing placeholders
                     expected = ui_extract_placeholders(key)
                     current = ui_extract_placeholders(value)
                     missing = [ph for ph in expected if ph not in current]
 
                     bg = ft.Colors.ORANGE_100 if missing else None
 
-                    # Create multiline text field
-                    tf = ft.TextField(
-                        value=value,
-                        expand=True,
-                        multiline=True,
-                        min_lines=1,
-                        max_lines=5,
-                        bgcolor=bg,
-                    )
-
-                    tf.on_change = lambda e, k=key, textfield=tf: on_value_change(e, k, textfield)
-
-                    editor_rows.controls.append(
-                        ft.Row(
-                            [
-                                ft.Text(key, width=400, selectable=True),
-                                tf,
-                            ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    # Unterscheide kurze und lange Labels
+                    if len(key) <= 40:
+                        # Kurze Labels: als TextField-Label
+                        control = ft.TextField(
+                            label=key,
+                            value=value,
+                            multiline=True,
+                            min_lines=1,
+                            max_lines=5,
+                            bgcolor=bg,
                         )
-                    )
+                        control.on_change = lambda e, k=key, textfield=control: on_value_change(e, k, textfield)
+                        editor_rows.controls.append(control)
+                    else:
+                        # Lange Labels: separates Text() + TextField
+                        tf = ft.TextField(
+                            value=value,
+                            multiline=True,
+                            min_lines=1,
+                            max_lines=5,
+                            bgcolor=bg,
+                            expand=True
+                        )
+                        tf.on_change = lambda e, k=key, textfield=tf: on_value_change(e, k, textfield)
+
+                        editor_rows.controls.append(
+                            ft.Column(
+                                [
+                                    ft.Text(key, size=10, selectable=True),
+                                    tf,
+                                ],
+                                spacing=2,
+                                expand=True,
+                            )
+                        )
 
                 update_warning_banner()
                 update_stats()
                 page.update()
 
-            def save_json(e) -> None:
-                """Save translations to JSON file."""
+            def save_json(e):
                 if not current_json_file["path"]:
                     return
 
                 parsed = {}
-                for row in editor_rows.controls:
-                    key = row.controls[0].value
-                    tf = row.controls[1]
-                    value = tf.value
+                for control in editor_rows.controls:
+                    # Unterscheide: TextField direkt vs Column
+                    if isinstance(control, ft.TextField):
+                        # Kurze Labels: key ist im label
+                        key = control.label
+                        value = control.value
+                    elif isinstance(control, ft.Column):
+                        # Lange Labels: key ist im Text, value im TextField
+                        key = control.controls[0].value
+                        value = control.controls[1].value
+                    else:
+                        continue  # Sollte nicht vorkommen
 
-                    # Remove line breaks if original has none
                     if "\n" not in key:
                         value = value.replace("\r\n", " ").replace("\n", " ")
                         value = " ".join(value.split())
 
-                    # Ensure all placeholders are present
                     expected = ui_extract_placeholders(key)
                     current = ui_extract_placeholders(value)
 
@@ -649,28 +647,35 @@ class TranslationSystem:
                     with open(current_json_file["path"], "w", encoding="utf-8") as f:
                         json.dump(parsed, f, ensure_ascii=False, indent=2)
 
-                    save_status.value = "✅ Saved successfully!"
-                    save_status.color = ft.Colors.GREEN
+                    page.snack_bar = ft.SnackBar(
+                        content=ft.Text("✅ Saved successfully!"),
+                        bgcolor=ft.Colors.GREEN,
+                    )
+                    page.snack_bar.open = True
                 except IOError as ex:
-                    save_status.value = f"❌ Save failed: {ex}"
-                    save_status.color = ft.Colors.RED
+                    page.snack_bar = ft.SnackBar(
+                        content=ft.Text(f"❌ Save failed: {ex}"),
+                        bgcolor=ft.Colors.RED,
+                    )
+                    page.snack_bar.open = True
 
                 page.update()
 
-            # Buttons
-            undo_button = ft.ElevatedButton("↶ Undo", on_click=undo, disabled=True)
-            redo_button = ft.ElevatedButton("↷ Redo", on_click=redo, disabled=True)
-            save_button = ft.ElevatedButton("💾 Save", on_click=save_json, disabled=True)
+            undo_button = ft.Button("↶ Undo", on_click=undo, disabled=True)
+            redo_button = ft.Button("↷ Redo", on_click=redo, disabled=True)
+            save_button = ft.Button("💾 Save", on_click=save_json, disabled=True)
 
-            def update_button_states() -> None:
-                """Update undo/redo button states."""
+            def update_button_states():
                 undo_button.disabled = len(undo_stack) == 0
                 redo_button.disabled = len(redo_stack) == 0
                 save_button.disabled = current_json_file["path"] is None
                 page.update()
 
-            def update_for_locale_change(e) -> None:
-                """Handle locale selection change."""
+            def update_for_locale_change(e):
+                # Auto-Save vor Wechsel
+                if current_json_file["path"]:
+                    save_json(None)
+
                 if not selected_pyfile["path"]:
                     return
 
@@ -689,7 +694,6 @@ class TranslationSystem:
                     )
 
                     load_data_into_editor(data)
-                    save_status.value = ""
                     undo_stack.clear()
                     redo_stack.clear()
                     update_button_states()
@@ -700,40 +704,52 @@ class TranslationSystem:
 
             locale_dropdown.on_change = update_for_locale_change
 
-            def on_file_picked(e: ft.FilePickerResultEvent) -> None:
-                """Handle file selection."""
-                if not e.files:
+            async def open_picker(e=None):
+                files = await ft.FilePicker().pick_files(
+                    allow_multiple=False,
+                    allowed_extensions=["py"]
+                )
+
+                if not files:
                     return
-                selected_pyfile["path"] = e.files[0].path
+
+                selected_pyfile["path"] = files[0].path
                 update_for_locale_change(None)
 
-            picker = ft.FilePicker(on_result=on_file_picked)
-            page.overlay.append(picker)
+            select_button = ft.Button(
+                "📂 Select Python File",
+                on_click=open_picker
+            )
 
-            # Build UI
+            # ---------------------------------------------------------
+
+            def on_resize(e):
+                editor_rows.height = int(page.height * 0.6)
+                editor_rows.width = page.width - 40
+                rebuild_editor()
+                page.update()
+
+            page.on_resize = on_resize
+
             page.add(
                 ft.Container(
-                    content=ft.Column([
-                        ft.Text("tr() / _() Extractor & Editor", size=24, weight=ft.FontWeight.BOLD),
-                        warning_text,
-                        ft.Row([
-                            locale_dropdown,
-                            ft.ElevatedButton(
-                                "📂 Select Python File",
-                                on_click=lambda _: picker.pick_files(
-                                    allowed_extensions=["py"],
-                                    allow_multiple=False
-                                )
-                            ),
-                        ]),
-                        result_text,
-                        stats_text,
-                        ft.Divider(),
-                        ft.Row([search_field, sort_dropdown]),
-                        ft.Row([undo_button, redo_button, save_button]),
-                        editor_rows,
-                        save_status,
-                    ]),
+                    content=ft.Column(
+                        expand=True,  # ← WICHTIG
+                        controls=[
+                            ft.Text("tr() / _() Extractor & Editor", size=24, weight=ft.FontWeight.BOLD),
+                            warning_text,
+                            ft.Row([
+                                locale_dropdown,
+                                select_button,
+                            ]),
+                            result_text,
+                            stats_text,
+                            ft.Divider(),
+                            ft.Row([search_field, sort_dropdown]),
+                            ft.Row([undo_button, redo_button, save_button]),
+                            editor_rows,
+                        ],
+                    ),
                     padding=20,
                 )
             )
